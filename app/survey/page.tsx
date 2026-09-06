@@ -1,5 +1,6 @@
 'use client'
 import { useMemo, useState } from 'react'
+import { submitContactOptIn, submitSurveyResponse } from '../../lib/pocketbase'
 
 const neighborhoods=['Hamilton Hill / Vale','Mont Pleasant','Bellevue','Northside / Goose Hill','Woodlawn','Central State','Stockade','Downtown','Eastern Avenue','Union Street / Other']
 const priorities=['Housing affordability','Homeownership','Crime / public safety','Youth programs','Jobs and wages','Grocery / food access','Vacant properties','Landlord / code enforcement','Neighborhood businesses','Transportation','Schools','Roads / infrastructure']
@@ -7,12 +8,38 @@ const actions=['Vote in local elections','Attend a neighborhood meeting','Attend
 
 export default function Survey(){
  const [step,setStep]=useState(0)
+ const [status,setStatus]=useState<'idle'|'saving'|'error'|'done'>('idle')
  const [data,setData]=useState<any>({role:'resident', neighborhood:'', priorities:[], registered:'', votedLocal:'', association:'', responsibilities:[], actions:[], contactOptIn:false, email:''})
  const total=7
  const toggle=(key:string,val:string)=>setData((d:any)=>({...d,[key]:d[key].includes(val)?d[key].filter((x:string)=>x!==val):[...d[key],val]}))
  const canNext=useMemo(()=>step===0?!!data.role:step===1?!!data.neighborhood:step===2?data.priorities.length>0:true,[step,data])
  const next=()=>setStep(s=>Math.min(s+1,total-1)); const back=()=>setStep(s=>Math.max(s-1,0))
- const submit=()=>{localStorage.setItem('one-schenectady-response',JSON.stringify({...data,submittedAt:new Date().toISOString()}));setStep(total-1)}
+ const submit=async()=>{
+   setStatus('saving')
+   try{
+     const params=new URLSearchParams(window.location.search)
+     const source=params.get('source')||'direct'
+     const campaign=params.get('campaign')||'organic'
+     let respondentToken=localStorage.getItem('one-schenectady-token')
+     if(!respondentToken){respondentToken=crypto.randomUUID();localStorage.setItem('one-schenectady-token',respondentToken)}
+     const response=await submitSurveyResponse({
+       role:data.role,
+       neighborhood:data.neighborhood,
+       priorities:data.priorities,
+       registered:data.registered,
+       votedLocal:data.votedLocal,
+       association:data.association,
+       responsibilities:data.responsibilities,
+       actions:data.actions,
+       source,
+       campaign,
+       respondentToken
+     })
+     if(data.contactOptIn&&data.email){await submitContactOptIn(response.id,data.email)}
+     setStatus('done')
+     setStep(total-1)
+   }catch(e){console.error(e);setStatus('error')}
+ }
  return <main className="shell"><div className="surveyShell"><a href="/" className="brand">ONE <span>SCHENECTADY</span></a><div style={{height:18}}/>
    <div className="surveyCard"><div className="progress"><div style={{width:`${((step+1)/total)*100}%`}}/></div>
    {step===0&&<><div className="eyebrow">Start here</div><div className="question">How are you connected to Schenectady?</div><div className="options">{[['resident','I live in Schenectady'],['stakeholder','I work, own a business/property, or serve Schenectady']].map(([v,l])=><label className="option" key={v}><input type="radio" name="role" checked={data.role===v} onChange={()=>setData({...data,role:v})}/>{l}</label>)}</div></>}
@@ -20,8 +47,8 @@ export default function Survey(){
    {step===2&&<><div className="eyebrow">Priorities</div><div className="question">If your neighborhood could require action on THREE issues in the next 24 months, which would you choose?</div><div className="options">{priorities.map(p=><label className="option" key={p}><input type="checkbox" checked={data.priorities.includes(p)} disabled={!data.priorities.includes(p)&&data.priorities.length>=3} onChange={()=>toggle('priorities',p)}/>{p}</label>)}</div></>}
    {step===3&&<><div className="eyebrow">Civic participation</div><div className="question">A few quick questions about local participation.</div><label>Are you registered to vote?</label><select className="field" value={data.registered} onChange={e=>setData({...data,registered:e.target.value})}><option value="">Choose</option><option>Yes</option><option>No</option><option>Not sure / prefer not to say</option></select><div style={{height:12}}/><label>Did you vote in the most recent local election?</label><select className="field" value={data.votedLocal} onChange={e=>setData({...data,votedLocal:e.target.value})}><option value="">Choose</option><option>Yes</option><option>No</option><option>Not eligible / prefer not to say</option></select><div style={{height:12}}/><label>Do you know your neighborhood association?</label><select className="field" value={data.association} onChange={e=>setData({...data,association:e.target.value})}><option value="">Choose</option><option>Yes, and I participate</option><option>Yes, but I do not participate</option><option>No / not sure</option></select></>}
    {step===4&&<><div className="eyebrow">Shared responsibility</div><div className="question">Who has responsibility for improving your neighborhood?</div><div className="options">{['City government','County government','School district','Landlords / property owners','Businesses / developers','Police / public safety agencies','Neighborhood organizations','Residents themselves','State / federal government'].map(x=><label className="option" key={x}><input type="checkbox" checked={data.responsibilities.includes(x)} onChange={()=>toggle('responsibilities',x)}/>{x}</label>)}</div></>}
-   {step===5&&<><div className="eyebrow">Community commitment</div><div className="question">What would YOU personally be willing to do?</div><div className="options">{actions.map(x=><label className="option" key={x}><input type="checkbox" checked={data.actions.includes(x)} onChange={()=>toggle('actions',x)}/>{x}</label>)}</div><div style={{height:18}}/><label className="option"><input type="checkbox" checked={data.contactOptIn} onChange={e=>setData({...data,contactOptIn:e.target.checked})}/>Send me optional opportunities to participate.</label>{data.contactOptIn&&<><div style={{height:12}}/><input className="field" type="email" placeholder="Email (stored separately in production)" value={data.email} onChange={e=>setData({...data,email:e.target.value})}/></>}</>}
-   {step===6&&<><div className="eyebrow">Thank you</div><div className="question">Your voice is part of the public record we are building.</div><p>Your response has been saved on this device for this prototype. Production launch will securely store anonymous research responses in the project database and keep optional contact information separate.</p><div className="notice">Public neighborhood results will appear only after minimum sample thresholds are met.</div><div className="ctaRow"><a className="btn primary" href="/">Return home</a></div></>}
-   {step<6&&<div className="ctaRow" style={{justifyContent:'space-between'}}>{step>0?<button className="btn secondary" onClick={back}>Back</button>:<span/>}{step<5?<button className="btn primary" disabled={!canNext} onClick={next}>Continue</button>:<button className="btn primary" onClick={submit}>Submit survey</button>}</div>}
+   {step===5&&<><div className="eyebrow">Community commitment</div><div className="question">What would YOU personally be willing to do?</div><div className="options">{actions.map(x=><label className="option" key={x}><input type="checkbox" checked={data.actions.includes(x)} onChange={()=>toggle('actions',x)}/>{x}</label>)}</div><div style={{height:18}}/><label className="option"><input type="checkbox" checked={data.contactOptIn} onChange={e=>setData({...data,contactOptIn:e.target.checked})}/>Send me optional opportunities to participate.</label>{data.contactOptIn&&<><div style={{height:12}}/><input className="field" type="email" placeholder="Email" value={data.email} onChange={e=>setData({...data,email:e.target.value})}/></>}{status==='error'&&<div className="notice" style={{marginTop:16}}>We could not submit your response. Please try again.</div>}</>}
+   {step===6&&<><div className="eyebrow">Thank you</div><div className="question">Your voice is now part of the community dataset.</div><p>Your research response was stored separately from any optional contact information you provided.</p><div className="notice">Public neighborhood results will appear only after minimum sample thresholds are met.</div><div className="ctaRow"><a className="btn primary" href="/">Return home</a></div></>}
+   {step<6&&<div className="ctaRow" style={{justifyContent:'space-between'}}>{step>0?<button className="btn secondary" onClick={back}>Back</button>:<span/>}{step<5?<button className="btn primary" disabled={!canNext} onClick={next}>Continue</button>:<button className="btn primary" disabled={status==='saving'} onClick={submit}>{status==='saving'?'Submitting...':'Submit survey'}</button>}</div>}
    </div></div></main>
 }
