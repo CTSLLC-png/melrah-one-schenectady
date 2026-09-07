@@ -1,0 +1,77 @@
+name: Deploy Apps Script
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps-script/**'
+      - '.github/workflows/deploy-apps-script.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        shell: bash
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          APPS_SCRIPT_ID: ${{ secrets.APPS_SCRIPT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLASPRC_JSON" || { echo 'Missing GitHub Actions secret: CLASPRC_JSON'; exit 2; }
+          test -n "$APPS_SCRIPT_ID" || { echo 'Missing GitHub Actions secret: APPS_SCRIPT_ID'; exit 2; }
+
+      - name: Install clasp
+        run: npm install --global @google/clasp@3.4.0
+
+      - name: Configure clasp authentication and project
+        shell: bash
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          APPS_SCRIPT_ID: ${{ secrets.APPS_SCRIPT_ID }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$CLASPRC_JSON" > "$RUNNER_TEMP/.clasprc.json"
+          chmod 600 "$RUNNER_TEMP/.clasprc.json"
+          cat > apps-script/.clasp.json <<EOF
+          {
+            "scriptId": "$APPS_SCRIPT_ID",
+            "rootDir": "."
+          }
+          EOF
+
+      - name: Push Apps Script source
+        working-directory: apps-script
+        env:
+          clasp_config_auth: ${{ runner.temp }}/.clasprc.json
+        run: clasp push --force
+
+      - name: Update production web-app deployment
+        working-directory: apps-script
+        env:
+          clasp_config_auth: ${{ runner.temp }}/.clasprc.json
+          DEPLOYMENT_ID: AKfycbzooZrV11LSDK1MjDQiXhYmjmrduUUochp09WUBVeGb0tD5LhmQOLbZg1RIKJPeKZ_d-Q
+        run: clasp create-deployment --deploymentId "$DEPLOYMENT_ID" --description "GitHub ${GITHUB_SHA}"
+
+      - name: Verify production Apps Script endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          ENDPOINT='https://script.google.com/macros/s/AKfycbzooZrV11LSDK1MjDQiXhYmjmrduUUochp09WUBVeGb0tD5LhmQOLbZg1RIKJPeKZ_d-Q/exec'
+          for i in 1 2 3 4 5 6; do
+            BODY="$(curl -sSL "$ENDPOINT?action=summary")"
+            if printf '%s' "$BODY" | grep -q '"ok":true'; then
+              printf '%s\n' "$BODY"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'Production Apps Script endpoint did not become healthy after deployment.'
+          exit 1
