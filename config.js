@@ -1,5 +1,4 @@
 window.ONE_SCHENECTADY_CONFIG={
-  // After deploying apps-script/Code.gs as a Google Apps Script Web App, paste its /exec URL here.
-  DATA_ENDPOINT:'',
+  DATA_ENDPOINT:'https://script.google.com/macros/s/AKfycbzooZrV11LSDK1MjDQiXhYmjmrduUUochp09WUBVeGb0tD5LhmQOLbZg1RIKJPeKZ_d-Q/exec',
   MIN_PUBLIC_SAMPLE:25
 };
