@@ -1,0 +1,67 @@
+name: Production Smoke Test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify Apps Script summary endpoint
+        run: |
+          set -euo pipefail
+          ENDPOINT='https://script.google.com/macros/s/AKfycbzooZrV11LSDK1MjDQiXhYmjmrduUUochp09WUBVeGb0tD5LhmQOLbZg1RIKJPeKZ_d-Q/exec'
+          curl -fsSL "$ENDPOINT?action=summary" | tee summary.json
+          grep -q '"ok":true' summary.json
+
+      - name: Submit synthetic survey response
+        run: |
+          set -euo pipefail
+          ENDPOINT='https://script.google.com/macros/s/AKfycbzooZrV11LSDK1MjDQiXhYmjmrduUUochp09WUBVeGb0tD5LhmQOLbZg1RIKJPeKZ_d-Q/exec'
+          RID="smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          printf '%s' "$RID" > response-id.txt
+          RESPONSE=$(curl -fsSL -X POST "$ENDPOINT" \
+            --data-urlencode "responseId=$RID" \
+            --data-urlencode "role=Resident" \
+            --data-urlencode "neighborhood=Other / Prefer not to say" \
+            --data-urlencode "priorities=Housing affordability" \
+            --data-urlencode "registered=Prefer not to say" \
+            --data-urlencode "votedLocal=Prefer not to say" \
+            --data-urlencode "association=No" \
+            --data-urlencode "responsibilities=Residents themselves" \
+            --data-urlencode "actions=Participate in cleanups / improvement projects" \
+            --data-urlencode "source=automated-smoke-test" \
+            --data-urlencode "campaign=production-launch-test")
+          echo "$RESPONSE"
+          test "$RESPONSE" = "ok"
+
+      - name: Verify public site and deployed config
+        run: |
+          set -euo pipefail
+          SITE='https://melrah-one-schenectady-ctsllc-pngs-projects.vercel.app'
+          for i in 1 2 3 4 5 6; do
+            if curl -fsSL "$SITE/config.js" -o config.js; then
+              if grep -q 'AKfycbzooZrV11LSDK1MjDQiXhYmjmrduUUochp09WUBVeGb0tD5LhmQOLbZg1RIKJPeKZ_d-Q' config.js; then
+                break
+              fi
+            fi
+            sleep 20
+          done
+          curl -fsSL "$SITE/" -o index.html
+          curl -fsSL "$SITE/survey.html" -o survey.html
+          grep -q 'AKfycbzooZrV11LSDK1MjDQiXhYmjmrduUUochp09WUBVeGb0tD5LhmQOLbZg1RIKJPeKZ_d-Q' config.js
+          grep -qi 'ONE SCHENECTADY' index.html
+          grep -qi 'survey' survey.html
+
+      - name: Upload smoke-test evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-smoke-test-evidence
+          path: |
+            summary.json
+            response-id.txt
+            config.js
+            index.html
+            survey.html
