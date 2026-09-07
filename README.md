@@ -42,3 +42,5 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 npm install
 npm run dev
 ```
+
+<!-- production verification trigger: Apps Script deployment completed 2026-09-07 -->
