@@ -11,13 +11,13 @@ jobs:
     steps:
       - name: Submit synthetic survey response
         id: post
-        continue-on-error: true
         run: |
           set -euo pipefail
           ENDPOINT='https://script.google.com/macros/s/AKfycbzooZrV11LSDK1MjDQiXhYmjmrduUUochp09WUBVeGb0tD5LhmQOLbZg1RIKJPeKZ_d-Q/exec'
           RID="smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           printf '%s' "$RID" > response-id.txt
-          curl -sSL -D post-headers.txt -o post-body.txt -X POST "$ENDPOINT" \
+
+          curl --fail-with-body -sSL -D post-headers.txt -o post-body.txt -X POST "$ENDPOINT" \
             --data-urlencode "responseId=$RID" \
             --data-urlencode "role=Resident" \
             --data-urlencode "neighborhood=Other / Prefer not to say" \
@@ -29,47 +29,61 @@ jobs:
             --data-urlencode "actions=Participate in cleanups / improvement projects" \
             --data-urlencode "source=automated-smoke-test" \
             --data-urlencode "campaign=production-launch-test"
+
+          echo '=== Response Headers ==='
+          cat post-headers.txt
+          echo '=== Response Body ==='
           cat post-body.txt
-          grep -qx 'ok' post-body.txt
+
+          if ! grep -qx 'ok' post-body.txt; then
+            echo 'ERROR: Apps Script POST did not return the expected exact body: ok'
+            exit 1
+          fi
 
       - name: Verify Apps Script summary endpoint
         id: get
-        continue-on-error: true
         run: |
           set -euo pipefail
           ENDPOINT='https://script.google.com/macros/s/AKfycbzooZrV11LSDK1MjDQiXhYmjmrduUUochp09WUBVeGb0tD5LhmQOLbZg1RIKJPeKZ_d-Q/exec'
-          curl -sSL -D get-headers.txt -o summary.json "$ENDPOINT?action=summary"
+          curl --fail-with-body -sSL -D get-headers.txt -o summary.json "$ENDPOINT?action=summary"
+          echo '=== Summary Headers ==='
+          cat get-headers.txt
+          echo '=== Summary Body ==='
           cat summary.json
-          grep -q '"ok":true' summary.json
+
+          if ! grep -q '"ok":true' summary.json; then
+            echo 'ERROR: Apps Script summary endpoint is not healthy.'
+            exit 1
+          fi
 
       - name: Verify public site and deployed config
         id: site
-        continue-on-error: true
         run: |
           set -euo pipefail
           SITE='https://melrah-one-schenectady-ctsllc-pngs-projects.vercel.app'
+
           for i in 1 2 3 4 5 6; do
-            if curl -fsSL "$SITE/config.js" -o config.js; then
-              if grep -q 'AKfycbzooZrV11LSDK1MjDQiXhYmjmrduUUochp09WUBVeGb0tD5LhmQOLbZg1RIKJPeKZ_d-Q' config.js; then
-                break
-              fi
+            if curl --fail-with-body -sSL "$SITE/config.js" -o config.js && \
+               grep -q 'AKfycbzooZrV11LSDK1MjDQiXhYmjmrduUUochp09WUBVeGb0tD5LhmQOLbZg1RIKJPeKZ_d-Q' config.js; then
+              break
+            fi
+            if [ "$i" -eq 6 ]; then
+              echo 'ERROR: Production config.js did not expose the expected Apps Script endpoint.'
+              exit 1
             fi
             sleep 20
           done
-          curl -fsSL "$SITE/" -o index.html
-          curl -fsSL "$SITE/survey.html" -o survey.html
-          grep -q 'AKfycbzooZrV11LSDK1MjDQiXhYmjmrduUUochp09WUBVeGb0tD5LhmQOLbZg1RIKJPeKZ_d-Q' config.js
+
+          curl --fail-with-body -sSL "$SITE/" -o index.html
+          curl --fail-with-body -sSL "$SITE/survey.html" -o survey.html
           grep -qi 'ONE SCHENECTADY' index.html
           grep -qi 'survey' survey.html
 
       - name: Report smoke-test status
         run: |
-          echo "POST=${{ steps.post.outcome }}"
-          echo "GET=${{ steps.get.outcome }}"
-          echo "SITE=${{ steps.site.outcome }}"
-          test "${{ steps.post.outcome }}" = success
-          test "${{ steps.get.outcome }}" = success
-          test "${{ steps.site.outcome }}" = success
+          echo 'POST=success'
+          echo 'GET=success'
+          echo 'SITE=success'
 
       - name: Upload smoke-test evidence
         if: always()
