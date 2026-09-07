@@ -17,7 +17,11 @@ jobs:
           RID="smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           printf '%s' "$RID" > response-id.txt
 
-          curl --fail-with-body -sSL -D post-headers.txt -o post-body.txt -X POST "$ENDPOINT" \
+          # Do not force -X POST here. Apps Script returns a redirect for
+          # TextOutput responses; curl must be allowed to follow that redirect
+          # using its normal method-switch behavior instead of POSTing to the
+          # redirected googleusercontent URL (which returns HTTP 405).
+          curl --fail-with-body -sSL -D post-headers.txt -o post-body.txt "$ENDPOINT" \
             --data-urlencode "responseId=$RID" \
             --data-urlencode "role=Resident" \
             --data-urlencode "neighborhood=Other / Prefer not to say" \
